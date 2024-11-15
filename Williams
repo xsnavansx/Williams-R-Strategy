@@ -1,0 +1,349 @@
+//@version=5
+strategy("Williams %R Strategy with RSI", overlay=true, default_qty_type=strategy.fixed, pyramiding=10)
+
+// Higher Timeframe Settings
+htfOn = input.bool(false, title="Higher Timeframe Check", group="Higher Timeframe Settings")
+htfEMA = input.int(defval=50, title="Higher Timeframe EMA", minval=1, group="Higher Timeframe Settings")
+higherTimeframe = input.timeframe(defval="D", title="Higher Timeframe", group="Higher Timeframe Settings")
+
+// Correlated Asset 1 Settings
+correlatedAssetOn = input.bool(false, title="Enable Correlated Asset 1", group="Correlated Asset 1 Settings")
+invertAssetOn = input.bool(false, title="Invert Correlated Asset 1", group="Correlated Asset 1 Settings")
+correlatedAsset = input.symbol("AAPL", "Select Correlated Asset 1", group="Correlated Asset 1 Settings")
+htfOn_correlated = input.bool(false, title="Higher Timeframe Check - Correlated Asset 1", group="Correlated Asset 1 Settings")
+higherTimeframe_correlated = input.timeframe(defval="D", title="Higher Timeframe - Correlated Asset 1", group="Correlated Asset 1 Settings")
+htfEMA_correlated = input.int(defval=50, title="Higher Timeframe EMA Correlated 1", minval=1, group="Correlated Asset 1 Settings")
+rsiOn_correlated = input.bool(false, title="Enable RSI Conditions for Correlated Asset 1", group="Correlated Asset 1 Settings")
+
+// Correlated Asset 2 Settings
+correlatedAssetOn2 = input.bool(false, title="Enable Correlated Asset 2", group="Correlated Asset 2 Settings")
+invertAssetOn2 = input.bool(false, title="Invert Correlated Asset 2", group="Correlated Asset 2 Settings")
+correlatedAsset2 = input.symbol("AAPL", "Select Correlated Asset 2", group="Correlated Asset 2 Settings")
+htfOn_correlated2 = input.bool(false, title="Higher Timeframe Check - Correlated Asset 2", group="Correlated Asset 2 Settings")
+higherTimeframe_correlated2 = input.timeframe(defval="D", title="Higher Timeframe - Correlated Asset 2", group="Correlated Asset 2 Settings")
+htfEMA_correlated2 = input.int(defval=50, title="Higher Timeframe EMA Correlated 2", minval=1, group="Correlated Asset 2 Settings")
+rsiOn_correlated2 = input.bool(false, title="Enable RSI Conditions for Correlated Asset 2", group="Correlated Asset 2 Settings")
+
+// Williams %R Settings
+length = input.int(14, title="Williams %R Length", group="Williams %R Settings")
+avgLength = input.int(3, title="Williams %R Average Length", minval=1, group="Williams %R Settings")  // Williams %R average period
+overbought = input.int(-20, title="Overbought Level", group="Williams %R Settings")
+oversold = input.int(-80, title="Oversold Level", group="Williams %R Settings")
+closeOnLevels = input.bool(true, title="Close Trades on Williams %R Threshold Crosses", group="Williams %R Settings")  // Option to close trades based on threshold
+
+// RSI Settings
+rsiOn = input.bool(false, title="Enable RSI Conditions", group="RSI Settings")
+rsiLength = input.int(14, title="RSI Length", minval=1, group="RSI Settings")
+rsiOverbought = input.int(70, title="RSI Overbought Level", group="RSI Settings")
+rsiOversold = input.int(30, title="RSI Oversold Level", group="RSI Settings")
+closeOnRSILevels = input.bool(false, title="Close Trades on RSI Threshold Crosses", group="RSI Settings")  // Option to close trades based on RSI threshold
+rsiOverbought2 = input.int(90, title="RSI Overbought Exit Level", group="RSI Settings")
+rsiOversold2 = input.int(10, title="RSI Oversold Exit Level", group="RSI Settings")
+
+// Risk Management Settings
+enableTrailing = input.bool(true, title="Enable Trailing Stop Loss", group="Risk Management Settings")
+rr_multiple = input.float(1.0, title="Stop Loss Trailing Multiple (xR)", group="Risk Management Settings")
+tp_rr_multiple = input.float(0, title="Take-Profit RR Multiple", step=0.1, group="Risk Management Settings")  // Set to 0 for no take-profit
+riskType = input.string("Dollar Amount", title="Risk Type", options=["Percentage", "Dollar Amount"], group="Risk Management Settings")
+riskAmount = input.float(1000.0, title="Risk Amount", step=0.1, group="Risk Management Settings")  // Set percentage or dollar risk based on selection
+
+// Calculate Williams %R manually
+highestHigh = ta.highest(high, length)
+lowestLow = ta.lowest(low, length)
+wr = -100 * (highestHigh - close) / (highestHigh - lowestLow)
+
+// Calculate the Williams %R average with user-defined period
+wrAvg = ta.sma(wr, avgLength)
+
+// Calculate RSI for the main asset
+rsiValue = ta.rsi(close, rsiLength)
+rsiOverboughtCondition = rsiValue[1] > rsiOverbought
+rsiOversoldCondition = rsiValue[1] < rsiOversold
+
+// Calculate Williams %R and RSI for Correlated Asset 1
+correlated_wr = request.security(correlatedAsset, timeframe.period, -100 * (ta.highest(high, length) - close) / (ta.highest(high, length) - ta.lowest(low, length)))
+correlated_rsi = request.security(correlatedAsset, timeframe.period, ta.rsi(close, rsiLength))
+correlated_rsiOverboughtCondition = correlated_rsi[1] > rsiOverbought
+correlated_rsiOversoldCondition = correlated_rsi[1] < rsiOversold
+
+// Initialize the boolean variables for Correlated Asset 1
+overboughtCWR = false
+oversoldCWR = false
+
+if not correlatedAssetOn
+    overboughtCWR := true
+    oversoldCWR := true
+else
+    // Check for overbought/oversold conditions without inversion
+    if not invertAssetOn
+        overboughtCWR := correlated_wr < overbought
+        oversoldCWR := correlated_wr > oversold
+    else
+        overboughtCWR := correlated_wr <= oversold
+        oversoldCWR := correlated_wr >= overbought
+
+// Calculate Williams %R and RSI for Correlated Asset 2
+correlated_wr2 = request.security(correlatedAsset2, timeframe.period, -100 * (ta.highest(high, length) - close) / (ta.highest(high, length) - ta.lowest(low, length)))
+correlated_rsi2 = request.security(correlatedAsset2, timeframe.period, ta.rsi(close, rsiLength))
+correlated_rsiOverboughtCondition2 = correlated_rsi2[1] > rsiOverbought
+correlated_rsiOversoldCondition2 = correlated_rsi2[1] < rsiOversold
+
+// Initialize the boolean variables for Correlated Asset 2
+overboughtCWR2 = false
+oversoldCWR2 = false
+
+if not correlatedAssetOn2
+    overboughtCWR2 := true
+    oversoldCWR2 := true
+else
+    // Check for overbought/oversold conditions without inversion
+    if not invertAssetOn2
+        overboughtCWR2 := correlated_wr2 < overbought
+        oversoldCWR2 := correlated_wr2 > oversold
+    else
+        overboughtCWR2 := correlated_wr2 <= oversold
+        oversoldCWR2 := correlated_wr2 >= overbought
+
+// Calculate risk-based position size
+var float buyStopLossLevel = na
+var float sellStopLossLevel = na
+var float buyTakeProfitLevel = na
+var float sellTakeProfitLevel = na
+var float buyRR = na
+var float sellRR = na
+var float positionSize = na
+
+// Variables to keep track of last trailing stop lines
+var line buyTrailStopLine = na
+var line sellTrailStopLine = na
+
+// Variables to keep track of entry prices
+var float buyEntryPrice = na
+var float sellEntryPrice = na
+
+// Higher timeframe EMAs
+htf_ema = htfOn ? request.security(syminfo.tickerid, higherTimeframe, ta.ema(close, htfEMA)) : na
+
+var bool htf_bullish = na
+var bool htf_bearish = na
+
+if htf_ema > htf_ema[1]
+    htf_bullish := true
+    htf_bearish := false
+else if htf_bullish and htf_ema == htf_ema[1]
+    htf_bullish := true
+    htf_bearish := false
+else if htf_ema < htf_ema[1]
+    htf_bullish := false
+    htf_bearish := true
+else if htf_bearish and htf_ema == htf_ema[1]
+    htf_bullish := false
+    htf_bearish := true
+
+plot(htf_ema, color=htf_bearish ? #790000 : #006503, linewidth=2, title="HTF EMA")
+
+htf_ema_correlated = htfOn_correlated ? request.security(correlatedAsset, higherTimeframe_correlated, ta.ema(close, htfEMA_correlated)) : na
+var bool htf_bullish_correlated = na
+var bool htf_bearish_correlated = na
+
+if htf_ema_correlated > htf_ema_correlated[1]
+    if not invertAssetOn
+        htf_bullish_correlated := true
+        htf_bearish_correlated := false
+    else
+        htf_bullish_correlated := false
+        htf_bearish_correlated := true
+else if htf_bullish_correlated and htf_ema_correlated == htf_ema_correlated[1]
+    htf_bullish_correlated := htf_bullish_correlated
+    htf_bearish_correlated := htf_bearish_correlated
+else if htf_ema_correlated < htf_ema_correlated[1]
+    if not invertAssetOn
+        htf_bullish_correlated := false
+        htf_bearish_correlated := true
+    else
+        htf_bullish_correlated := true
+        htf_bearish_correlated := false
+else if htf_bearish_correlated and htf_ema_correlated == htf_ema_correlated[1]
+    htf_bullish_correlated := htf_bullish_correlated
+    htf_bearish_correlated := htf_bearish_correlated
+
+htf_ema_correlated2 = htfOn_correlated2 ? request.security(correlatedAsset2, higherTimeframe_correlated2, ta.ema(close, htfEMA_correlated2)) : na
+
+var bool htf_bullish_correlated2 = na
+var bool htf_bearish_correlated2 = na
+
+if htf_ema_correlated2 > htf_ema_correlated2[1]
+    if not invertAssetOn2
+        htf_bullish_correlated2 := true
+        htf_bearish_correlated2 := false
+    else
+        htf_bullish_correlated2 := false
+        htf_bearish_correlated2 := true
+else if htf_bullish_correlated2 and htf_ema_correlated2 == htf_ema_correlated2[1]
+    htf_bullish_correlated2 := htf_bullish_correlated2
+    htf_bearish_correlated2 := htf_bearish_correlated2
+else if htf_ema_correlated2 < htf_ema_correlated2[1]
+    if not invertAssetOn2
+        htf_bullish_correlated2 := false
+        htf_bearish_correlated2 := true
+    else
+        htf_bullish_correlated2 := true
+        htf_bearish_correlated2 := false
+else if htf_bearish_correlated2 and htf_ema_correlated2 == htf_ema_correlated2[1]
+    htf_bullish_correlated2 := htf_bullish_correlated2
+    htf_bearish_correlated2 := htf_bearish_correlated2
+
+// Buy and Sell Conditions
+buyCondition = ta.crossover(wr, oversold)
+
+// Apply RSI condition if enabled
+if rsiOn
+    buyCondition := buyCondition and rsiOversoldCondition
+
+// Apply higher timeframe condition if enabled
+if htfOn
+    buyCondition := buyCondition and htf_bullish
+
+// Apply conditions for Correlated Asset 1
+if correlatedAssetOn
+    buyCondition := buyCondition and oversoldCWR
+    if rsiOn_correlated
+        buyCondition := buyCondition and correlated_rsiOversoldCondition
+    if htfOn_correlated
+        buyCondition := buyCondition and htf_bullish_correlated
+
+// Apply conditions for Correlated Asset 2
+if correlatedAssetOn2
+    buyCondition := buyCondition and oversoldCWR2
+    if rsiOn_correlated2
+        buyCondition := buyCondition and correlated_rsiOversoldCondition2
+    if htfOn_correlated2
+        buyCondition := buyCondition and htf_bullish_correlated2
+
+sellCondition = ta.crossunder(wr, overbought)
+
+// Apply RSI condition if enabled
+if rsiOn
+    sellCondition := sellCondition and rsiOverboughtCondition
+
+// Apply higher timeframe condition if enabled
+if htfOn
+    sellCondition := sellCondition and htf_bearish
+
+// Apply conditions for Correlated Asset 1
+if correlatedAssetOn
+    sellCondition := sellCondition and overboughtCWR
+    if rsiOn_correlated
+        sellCondition := sellCondition and correlated_rsiOverboughtCondition
+    if htfOn_correlated
+        sellCondition := sellCondition and htf_bearish_correlated
+
+// Apply conditions for Correlated Asset 2
+if correlatedAssetOn2
+    sellCondition := sellCondition and overboughtCWR2
+    if rsiOn_correlated2
+        sellCondition := sellCondition and correlated_rsiOverboughtCondition2
+    if htfOn_correlated2
+        sellCondition := sellCondition and htf_bearish_correlated2
+
+// Execute buy order with risk-based position sizing
+if buyCondition
+    buyEntryPrice := close  // Store the entry price
+    buyStopLossLevel := low  // Set initial stop loss for buy
+    // Update buy stop loss: find lowest low while Williams %R is below or equal to -80
+    if wr[1] <= -80
+        buyStopLossLevel := na(buyStopLossLevel) ? low : math.min(buyStopLossLevel, low)
+
+    buyRR := close - buyStopLossLevel
+    buyTakeProfitLevel := tp_rr_multiple > 0 ? close + buyRR * tp_rr_multiple : na
+
+    // Calculate position size based on risk type
+    if riskType == "Percentage"
+        positionSize := (strategy.equity * (riskAmount / 100)) / buyRR
+    else if riskType == "Dollar Amount"
+        positionSize := riskAmount / buyRR
+
+    // Enter buy with calculated position size
+    strategy.entry("Buy", strategy.long, qty=positionSize)
+
+    // Draw 1-candle-long hLines for buy entry, stop loss, and take profit
+    line.new(x1=bar_index, y1=close, x2=bar_index + 1, y2=close, color=color.green, width=2)  // Entry line
+    line.new(x1=bar_index, y1=buyStopLossLevel, x2=bar_index + 1, y2=buyStopLossLevel, color=color.red, width=2)  // Stop loss line
+    if buyTakeProfitLevel
+        line.new(x1=bar_index, y1=buyTakeProfitLevel, x2=bar_index + 1, y2=buyTakeProfitLevel, color=color.blue, width=2)  // Take profit line
+
+// Execute sell order with risk-based position sizing
+if sellCondition
+    sellEntryPrice := close  // Store the entry price
+    sellStopLossLevel := high  // Set initial stop loss for sell
+    // Update sell stop loss: find highest high while Williams %R is above or equal to -20
+    if wr[1] >= -20
+        sellStopLossLevel := na(sellStopLossLevel) ? high : math.max(sellStopLossLevel, high)
+    sellRR := sellStopLossLevel - close
+    sellTakeProfitLevel := tp_rr_multiple > 0 ? close - sellRR * tp_rr_multiple : na
+
+    // Calculate position size based on risk type
+    if riskType == "Percentage"
+        positionSize := (strategy.equity * (riskAmount / 100)) / sellRR
+    else if riskType == "Dollar Amount"
+        positionSize := riskAmount / sellRR
+
+    // Enter sell with calculated position size
+    strategy.entry("Sell", strategy.short, qty=positionSize)
+
+    // Draw 1-candle-long hLines for sell entry, stop loss, and take profit
+    line.new(x1=bar_index, y1=close, x2=bar_index + 1, y2=close, color=color.green, width=2)  // Entry line
+    line.new(x1=bar_index, y1=sellStopLossLevel, x2=bar_index + 1, y2=sellStopLossLevel, color=color.red, width=2)  // Stop loss line
+    if sellTakeProfitLevel
+        line.new(x1=bar_index, y1=sellTakeProfitLevel, x2=bar_index + 1, y2=sellTakeProfitLevel, color=color.blue, width=2)  // Take profit line
+
+var float buyTrailStop = na
+var float sellTrailStop = na
+
+// Trailing step logic for buy position
+if enableTrailing and barstate.isconfirmed and strategy.position_size > 0
+    buyTrailStop := buyStopLossLevel + buyRR
+    if buyTrailStop < high - buyRR * rr_multiple
+        buyStopLossLevel := buyTrailStop
+        // Update or create the 1-candle-long hLine for trailing stop (dotted white)
+        buyTrailStopLine := line.new(x1=bar_index, y1=buyStopLossLevel, x2=bar_index + 1, y2=buyStopLossLevel, color=color.white, style=line.style_dotted, width=2)
+
+// Trailing step logic for sell position
+if enableTrailing and barstate.isconfirmed and strategy.position_size < 0
+    sellTrailStop := sellStopLossLevel - sellRR
+    if sellTrailStop > low + sellRR * rr_multiple
+        sellStopLossLevel := sellTrailStop
+        // Update or create the 1-candle-long hLine for trailing stop (dotted white)
+        sellTrailStopLine := line.new(x1=bar_index, y1=sellStopLossLevel, x2=bar_index + 1, y2=sellStopLossLevel, color=color.white, style=line.style_dotted, width=2)
+
+// Close buy position if wrAvg crosses above -20
+if closeOnLevels and strategy.position_size > 0 and ta.crossover(wrAvg, overbought) and close > buyEntryPrice
+    strategy.close("Buy", comment="Win - Overbought")
+
+// Close sell position if wrAvg crosses below -80
+if closeOnLevels and strategy.position_size < 0 and ta.crossunder(wrAvg, oversold) and close < sellEntryPrice
+    strategy.close("Sell", comment="Win - Oversold")
+
+// Close buy position if wrAvg crosses above -20
+if closeOnRSILevels and strategy.position_size > 0 and ta.crossover(rsiValue, rsiOverbought2) and close > buyEntryPrice
+    strategy.close("Buy", comment="Win - Overbought")
+
+// Close sell position if wrAvg crosses below -80
+if closeOnRSILevels and strategy.position_size < 0 and ta.crossunder(rsiValue, rsiOversold2) and close < sellEntryPrice
+    strategy.close("Sell", comment="Win - Oversold")
+
+// Final exit statements for stop loss and take profit with profit check
+if strategy.position_size > 0
+    // Check if the stop loss or take profit exit is above the entry for a buy (profit)
+    isBuyProfit = buyStopLossLevel > buyEntryPrice
+    isBreakEven = buyStopLossLevel == buyEntryPrice
+    // Modify the comment for stop loss based on profit, break-even, or loss
+    strategy.exit("SL Hit", "Buy", stop=buyStopLossLevel, comment=isBuyProfit ? "Win - SL" : isBreakEven ? "BE - SL" : "Loss - SL")
+    strategy.exit("TP Hit", "Buy", limit=buyTakeProfitLevel, comment="Win - TP")
+if strategy.position_size < 0
+    // Check if the stop loss or take profit exit is below the entry for a sell (profit)
+    isSellProfit = sellStopLossLevel < sellEntryPrice
+    isBreakEven = sellStopLossLevel == sellEntryPrice
+    // Modify the comment for stop loss based on profit, break-even, or loss
+    strategy.exit("SL Hit", "Sell", stop=sellStopLossLevel, comment=isSellProfit ? "Win - SL" : isBreakEven ? "BE - SL" : "Loss - SL")
+    strategy.exit("TP Hit", "Sell", limit=sellTakeProfitLevel, comment="Win - TP")
